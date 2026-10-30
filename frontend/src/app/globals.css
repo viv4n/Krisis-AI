@@ -1,0 +1,127 @@
+@import 'leaflet/dist/leaflet.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* ==========================================================================
+   DSU DIGITAL TWIN COMMAND - 3 HIGH-END DARK VISUAL MATRIX PALETTES
+   1. cyber-neon      - Dark synthwave void with neon rose/magenta telemetry
+   2. emerald-grid    - Dark tactical bio-matrix with vibrant mint/emerald telemetry
+   3. monochrome      - Pitch-black OLED backdrop with high-contrast amber/gold telemetry
+   ========================================================================== */
+
+/* 1. Cyber Neon (Default) */
+:root,
+[data-matrix="cyber-neon"] {
+  --matrix-bg: #090B10;
+  --matrix-surface: #10141E;
+  --matrix-card: #131824;
+  --matrix-border: rgba(244, 63, 94, 0.22);
+  --matrix-text: #F8FAFC;
+  --matrix-muted: #94A3B8;
+  --matrix-accent: #F43F5E;       /* Neon Rose / Magenta */
+  --matrix-high: #F43F5E;         /* Magenta Rose */
+  --matrix-med: #FB923C;          /* Orange / Amber */
+  --matrix-low: #38BDF8;          /* Cyan */
+  --matrix-glow: rgba(244, 63, 94, 0.35);
+}
+
+/* 2. Emerald Grid */
+[data-matrix="emerald-grid"] {
+  --matrix-bg: #070F0D;
+  --matrix-surface: #0E1B17;
+  --matrix-card: #11221D;
+  --matrix-border: rgba(16, 185, 129, 0.24);
+  --matrix-text: #ECFDF5;
+  --matrix-muted: #6EE7B7;
+  --matrix-accent: #10B981;       /* Vibrant Mint / Emerald */
+  --matrix-high: #F43F5E;         /* Emergency Red */
+  --matrix-med: #F59E0B;          /* Amber */
+  --matrix-low: #10B981;          /* Emerald */
+  --matrix-glow: rgba(16, 185, 129, 0.35);
+}
+
+/* 3. Monochrome Stealth */
+[data-matrix="monochrome"] {
+  --matrix-bg: #000000;
+  --matrix-surface: #0A0A0A;
+  --matrix-card: #121212;
+  --matrix-border: rgba(245, 158, 11, 0.25);
+  --matrix-text: #FFFFFF;
+  --matrix-muted: #A3A3A3;
+  --matrix-accent: #F59E0B;       /* High-contrast Amber / Gold */
+  --matrix-high: #EF4444;         /* Red */
+  --matrix-med: #F59E0B;          /* Amber */
+  --matrix-low: #D97706;          /* Deep Gold */
+  --matrix-glow: rgba(245, 158, 11, 0.35);
+}
+
+/* Stealth Mode Override (Subtle minimal HUD) */
+[data-stealth="true"] {
+  --matrix-glow: transparent !important;
+  --matrix-border: rgba(255, 255, 255, 0.12) !important;
+}
+
+body {
+  background-color: var(--matrix-bg);
+  color: var(--matrix-text);
+  font-family: 'Inter', -apple-system, sans-serif;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Common tactical card styling */
+.tactical-card {
+  background-color: var(--matrix-card);
+  border: 1px solid var(--matrix-border);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+  transition: all 0.2s ease-in-out;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--matrix-border);
+  border-radius: 2px;
+}
+
+/* Leaflet Container Strict Styles */
+.leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  background: #090B10 !important;
+  font-family: 'Inter', sans-serif !important;
+  z-index: 0;
+}
+
+.leaflet-popup-content-wrapper {
+  background: var(--matrix-card) !important;
+  color: var(--matrix-text) !important;
+  border: 1px solid var(--matrix-border) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.7) !important;
+  padding: 0 !important;
+}
+
+.leaflet-popup-content {
+  margin: 0 !important;
+}
+
+.leaflet-popup-tip {
+  background: var(--matrix-card) !important;
+}
+
+.cluster-pin {
+  background: transparent;
+  border: none;
+}
