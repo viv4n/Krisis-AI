@@ -1,0 +1,50 @@
+﻿{
+  "endpoints": {
+    "submit_report": {
+      "method": "POST",
+      "path": "/api/v1/report",
+      "request": {
+        "image_base64": "string (optional)",
+        "text": "string",
+        "latitude": 12.6582,
+        "longitude": 77.4429,
+        "source": "web | whatsapp | sms"
+      },
+      "response": {
+        "status": "success | quarantined | escalated",
+        "report_id": "string (uuid)",
+        "message": "string"
+      }
+    },
+    "get_incidents": {
+      "method": "GET",
+      "path": "/api/v1/incidents",
+      "response": [
+        {
+          "cluster_id": "string (uuid)",
+          "latitude": 12.6582,
+          "longitude": 77.4429,
+          "report_count": 8,
+          "hazard_type": "flood | structural_damage | blocked_road",
+          "priority_score": 87.5,
+          "uncertainty_escalated": false,
+          "first_reported_at": "2026-10-30T13:20:00Z",
+          "last_reported_at": "2026-10-30T13:45:00Z"
+        }
+      ]
+    },
+    "get_route_passability": {
+      "method": "GET",
+      "path": "/api/v1/routes/passability",
+      "response": [
+        {
+          "route_id": "road_seg_104",
+          "name": "Main Hospital Arterial Road",
+          "status": "blocked | passable | degraded",
+          "severed_by_incident_id": "string (uuid) or null",
+          "coordinates": [[77.4421, 12.6580], [77.4435, 12.6592]]
+        }
+      ]
+    }
+  }
+}
