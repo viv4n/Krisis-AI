@@ -40,6 +40,22 @@ CRITICAL_INFRASTRUCTURE = [
     {"name": "Emergency Relief Depot", "lat": 12.6610, "lon": 77.4460}
 ]
 
+# AI Safety Net spam/promotional patterns
+SPAM_PATTERNS = [
+    r"\b(buy now|discount|promo code|special offer|free crypto|bitcoin|ethereum|casino|viagra|lottery|earn money|subscribe to)\b",
+    r"\b(click here|limited time offer|congratulations you won|cash prize|work from home|weight loss)\b",
+]
+
+NON_EMERGENCY_CHITCHAT = [
+    r"^(hi|hello|hey|test|testing|yo|sup|good morning|good evening|good night|how are you|what's up|who is this|who are you)\b",
+]
+
+HAZARD_DISTRESS_KEYWORDS = [
+    "flood", "water", "drown", "fire", "smoke", "burn", "collapse",
+    "trapped", "help", "emergency", "blocked", "road", "tree", "damage",
+    "injured", "hospital", "ambulance", "rescue", "hazard", "leak", "crush"
+]
+
 
 def init_db():
     """Initialize SQLite tables for incident clusters and individual reports."""
@@ -70,9 +86,15 @@ def init_db():
             source TEXT NOT NULL,
             status TEXT NOT NULL,
             priority_score REAL NOT NULL,
+            phash TEXT,
             created_at TEXT NOT NULL
         )
     """)
+    # Automatic migration: ensure phash column exists on older tables
+    try:
+        cursor.execute("ALTER TABLE reports ADD COLUMN phash TEXT;")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
 
@@ -80,44 +102,91 @@ def init_db():
 init_db()
 
 
+def hamming_distance(hash1: str, hash2: str) -> int:
+    """
+    Computes Hamming distance between two hex-encoded perceptual hashes.
+    Each hex char represents 4 bits. Typical 16-hex hash is 64 bits.
+    """
+    if not hash1 or not hash2:
+        return 64
+    try:
+        val1 = int(hash1, 16)
+        val2 = int(hash2, 16)
+        xor_result = val1 ^ val2
+        return bin(xor_result).count("1")
+    except (ValueError, TypeError):
+        dist = sum(c1 != c2 for c1, c2 in zip(hash1, hash2))
+        dist += abs(len(hash1) - len(hash2))
+        return dist
+
+
+def find_duplicate_by_phash(phash: Optional[str], threshold: int = 5) -> tuple[bool, Optional[str], Optional[str]]:
+    """
+    Query the database for recent reports with a phash.
+    If the Hamming distance is less than threshold (e.g., 5),
+    flags it as a duplicate and returns (is_duplicate, matched_report_id, matched_cluster_id).
+    """
+    if not phash:
+        return False, None, None
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT report_id, cluster_id, phash
+        FROM reports
+        WHERE phash IS NOT NULL AND phash != '' AND cluster_id IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT 100
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    for r_id, c_id, stored_hash in rows:
+        dist = hamming_distance(phash, stored_hash)
+        if dist < threshold:
+            return True, r_id, c_id
+
+    return False, None, None
+
+
+def check_ai_safety_net_spam(text: str) -> tuple[bool, str]:
+    """
+    Validation layer before heavy ML inference:
+    Detects obvious non-emergency spam, commercial promotions, or pure chit-chat
+    that contains no emergency distress or hazard tokens.
+    """
+    if not text or not text.strip():
+        return True, "Empty text content"
+
+    t = text.lower().strip()
+
+    # Check for commercial / promotional spam patterns
+    for pattern in SPAM_PATTERNS:
+        if re.search(pattern, t):
+            return True, "Commercial or promotional spam detected"
+
+    # Check for conversational chit-chat / test phrases without hazard words
+    is_chitchat = any(re.search(p, t) for p in NON_EMERGENCY_CHITCHAT)
+    if is_chitchat:
+        has_hazard = any(h in t for h in HAZARD_DISTRESS_KEYWORDS)
+        if not has_hazard:
+            return True, "Non-emergency conversational noise / test text"
+
+    # Extreme repetition / keyboard mash (e.g. "asdfasdfasdf" or "aaaaaaa")
+    if len(t) > 6 and len(set(t.replace(" ", ""))) <= 2:
+        return True, "Gibberish or repetitive character spam"
+
+    return False, ""
+
+
 def classify_hazard(text: str) -> HazardType:
     """Classify hazard type based on keyword tokens."""
     t = text.lower()
-    if any(k in t for k in ["flood", "water", "drown", "submerged", "overflow", "river"]):
+    if any(k in t for k in ["flood", "water", "drown", "submerged", "overflow", "river", "bayou"]):
         return "flood"
-    if any(k in t for k in ["road", "blocked", "traffic", "landslide", "tree fell", "obstruction", "passage"]):
+    if any(k in t for k in ["road", "blocked", "traffic", "landslide", "tree fell", "obstruction", "passage", "highway", "bridge"]):
         return "blocked_road"
     return "structural_damage"
-
-
-def calculate_nlp_urgency(text: str) -> float:
-    """Calculates NLP urgency score from 0.0 to 100.0."""
-    t = text.lower()
-    urgent_matches = sum(1 for token in URGENT_TOKENS if re.search(rf"\b{token}\b", t))
-    base = 30.0
-    score = base + (urgent_matches * 20.0)
-    # Exclamation marks or caps
-    if "!" in text or text.isupper():
-        score += 10.0
-    return min(100.0, score)
-
-
-def calculate_visual_damage(has_image: bool, visual_clarity: float, text: str) -> float:
-    """
-    Computes visual damage indicator from 0.0 to 100.0.
-    In production this interfaces with Vision-LLM or computer vision models.
-    """
-    if not has_image:
-        return 40.0  # text-only median assessment
-    
-    # Assess severity from text correlation and image quality
-    t = text.lower()
-    severity = 50.0
-    if any(w in t for w in ["destroyed", "collapsed", "fire", "heavy", "severe", "crushed"]):
-        severity += 35.0
-    elif any(w in t for w in ["crack", "leak", "minor", "small"]):
-        severity -= 15.0
-    return min(100.0, max(10.0, severity * visual_clarity))
 
 
 def calculate_infrastructure_proximity_score(lat: float, lon: float) -> float:
@@ -158,26 +227,71 @@ def calculate_priority_score(
     priority_score = (visual_damage * 0.4) + (nlp_urgency * 0.3) + (infrastructure_proximity * 0.3)
     normalized to 0-100.
     """
-    score = (visual_damage * 0.4) + (nlp_urgency * 0.3) + (infra_proximity * 0.3)
+    v_norm = visual_damage * 100.0 if visual_damage <= 1.0 else visual_damage
+    n_norm = nlp_urgency * 100.0 if nlp_urgency <= 1.0 else nlp_urgency
+    i_norm = infra_proximity
+
+    score = (v_norm * 0.4) + (n_norm * 0.3) + (i_norm * 0.3)
     return round(min(100.0, max(0.0, score)), 2)
 
 
 def check_uncertainty_escalation(
     has_image: bool,
     visual_confidence: float,
-    text: str
+    text: str,
+    nlp_urgency: float = 0.5,
+    contains_critical: bool = False
 ) -> bool:
     """
     Uncertainty Escalation:
     If visual confidence < VISUAL_CONFIDENCE_THRESHOLD (0.50)
-    but text contains urgent tokens (["trapped", "fire", "emergency", "blocked", "help", "collapse"]),
+    and NLP urgency is high (urgency >= 0.65 or contains critical keywords),
     explicitly set uncertainty_escalated = True.
     """
+    is_low_visual_conf = (not has_image) or (visual_confidence < settings.VISUAL_CONFIDENCE_THRESHOLD)
     t = text.lower()
-    has_urgent_token = any(token in t for token in URGENT_TOKENS)
-    is_low_visual_confidence = (not has_image) or (visual_confidence < settings.VISUAL_CONFIDENCE_THRESHOLD)
+    has_urgent_token = contains_critical or any(token in t for token in URGENT_TOKENS)
+    is_high_nlp = has_urgent_token or (nlp_urgency >= 0.65)
 
-    return bool(is_low_visual_confidence and has_urgent_token)
+    return bool(is_low_visual_conf and is_high_nlp)
+
+
+def merge_into_existing_cluster(
+    cluster_id: str,
+    priority_score: float,
+    uncertainty_escalated: bool,
+    now_iso: str
+) -> bool:
+    """
+    Directly increments report_count and updates priority_score, uncertainty_escalated,
+    and last_reported_at for an existing cluster_id (e.g. from pHash deduplication).
+    Returns True if cluster was found and updated, False otherwise.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT report_count, priority_score, uncertainty_escalated
+        FROM clusters
+        WHERE cluster_id = ?
+    """, (cluster_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return False
+
+    old_count, old_score, old_esc = row
+    new_count = old_count + 1
+    updated_score = round(max(old_score, (old_score * old_count + priority_score) / new_count), 2)
+    combined_esc = int(bool(old_esc or uncertainty_escalated))
+
+    cursor.execute("""
+        UPDATE clusters
+        SET report_count = ?, priority_score = ?, uncertainty_escalated = ?, last_reported_at = ?
+        WHERE cluster_id = ?
+    """, (new_count, updated_score, combined_esc, now_iso, cluster_id))
+    conn.commit()
+    conn.close()
+    return True
 
 
 def merge_or_create_cluster(
@@ -196,7 +310,10 @@ def merge_or_create_cluster(
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT cluster_id, latitude, longitude, report_count, priority_score, uncertainty_escalated, first_reported_at FROM clusters")
+    cursor.execute("""
+        SELECT cluster_id, latitude, longitude, report_count, priority_score, uncertainty_escalated, first_reported_at
+        FROM clusters
+    """)
     clusters = cursor.fetchall()
 
     target_cluster = None
@@ -209,7 +326,6 @@ def merge_or_create_cluster(
     if target_cluster:
         c_id, c_lat, c_lon, count, old_score, old_esc, f_time = target_cluster
         new_count = count + 1
-        # Rolling weighted priority score update (highest urgency weighted)
         updated_score = round(max(old_score, (old_score * count + priority_score) / new_count), 2)
         combined_escalated = int(bool(old_esc or uncertainty_escalated))
         
@@ -237,6 +353,35 @@ def merge_or_create_cluster(
         conn.commit()
         conn.close()
         return new_cluster_id, False
+
+
+def get_cluster_by_id(cluster_id: str) -> Optional[dict]:
+    """Retrieve an active cluster dict by its cluster_id."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT cluster_id, latitude, longitude, report_count, hazard_type,
+               priority_score, uncertainty_escalated, first_reported_at, last_reported_at
+        FROM clusters
+        WHERE cluster_id = ?
+    """, (cluster_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    return {
+        "cluster_id": row[0],
+        "latitude": row[1],
+        "longitude": row[2],
+        "report_count": row[3],
+        "hazard_type": row[4],
+        "priority_score": float(row[5]),
+        "uncertainty_escalated": bool(row[6]),
+        "first_reported_at": row[7],
+        "last_reported_at": row[8]
+    }
 
 
 def get_all_clusters() -> list[dict]:
@@ -283,7 +428,6 @@ def get_route_passabilities() -> list[dict]:
 
         for cl in clusters:
             dist = point_to_polyline_distance_meters(cl["latitude"], cl["longitude"], route_coords)
-            # If high severity incident or blocked_road within 40 meters, route is blocked
             if dist <= 40.0:
                 if cl["hazard_type"] == "blocked_road" or cl["priority_score"] >= 70.0:
                     status = "blocked"
@@ -292,7 +436,7 @@ def get_route_passabilities() -> list[dict]:
                 elif cl["priority_score"] >= 40.0:
                     status = "degraded"
                     severed_by = cl["cluster_id"]
-            elif dist <= 80.0 and status == "passable" and cl["priority_score"] >= 80.0:
+            elif dist <= settings.ROUTE_PROXIMITY_THRESHOLD_METERS and status == "passable" and cl["priority_score"] >= 80.0:
                 status = "degraded"
                 severed_by = cl["cluster_id"]
 
@@ -305,4 +449,3 @@ def get_route_passabilities() -> list[dict]:
         })
 
     return routes
-

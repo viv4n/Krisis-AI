@@ -1,9 +1,11 @@
-﻿# Python / Backend
-backend/__pycache__/
-backend/*.pyc
+# Python / Backend
+**/__pycache__/
+*.pyc
 backend/.env
 backend/venv/
 backend/.pytest_cache/
+*.pt
+*.db
 
 # Node / Frontend
 frontend/node_modules/

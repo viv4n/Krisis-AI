@@ -6,8 +6,22 @@ import {
 } from "@/types/api";
 import { MOCK_INCIDENTS, MOCK_ROUTES } from "./mockData";
 
-const BACKEND_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const RAW_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BACKEND_BASE_URL = RAW_API_URL.replace(/\/+$/, "");
+
+/**
+ * Returns dynamic WebSocket URL from NEXT_PUBLIC_API_URL,
+ * supporting https -> wss and http -> ws with fallback to localhost.
+ */
+function getWebSocketUrl(): string {
+  if (BACKEND_BASE_URL.startsWith("https://")) {
+    return BACKEND_BASE_URL.replace(/^https:\/\//, "wss://") + "/ws/incidents";
+  }
+  if (BACKEND_BASE_URL.startsWith("http://")) {
+    return BACKEND_BASE_URL.replace(/^http:\/\//, "ws://") + "/ws/incidents";
+  }
+  return `ws://${BACKEND_BASE_URL}/ws/incidents`;
+}
 
 let activeMockIncidents: IncidentCluster[] = [...MOCK_INCIDENTS];
 
@@ -139,4 +153,71 @@ export async function submitReport(
 
     return { response: fallbackResponse, isFallback: true };
   }
+}
+
+export type WebSocketIncidentPayload =
+  | IncidentCluster[]
+  | IncidentCluster
+  | {
+      type?: string;
+      incident?: IncidentCluster;
+      incidents?: IncidentCluster[];
+      cluster_id?: string;
+      priority_score?: number;
+      [key: string]: unknown;
+    };
+
+/**
+ * Connect to backend real-time WebSocket for live incident streaming.
+ * Automatically reconnects with backoff if disconnected.
+ */
+export function subscribeToIncidents(
+  onUpdate: (data: WebSocketIncidentPayload) => void
+): () => void {
+  const wsUrl = getWebSocketUrl();
+  let socket: WebSocket | null = null;
+  let isClosedManually = false;
+  let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function connect() {
+    if (isClosedManually) return;
+    try {
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        // Connected to real-time stream
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          onUpdate(payload);
+        } catch (err) {
+          console.error("WebSocket frame parsing error:", err);
+        }
+      };
+
+      socket.onclose = () => {
+        if (!isClosedManually) {
+          reconnectTimeout = setTimeout(connect, 3000);
+        }
+      };
+
+      socket.onerror = () => {
+        socket?.close();
+      };
+    } catch {
+      if (!isClosedManually) {
+        reconnectTimeout = setTimeout(connect, 5000);
+      }
+    }
+  }
+
+  connect();
+
+  return () => {
+    isClosedManually = true;
+    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    if (socket) socket.close();
+  };
 }

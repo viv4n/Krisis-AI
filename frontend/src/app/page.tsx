@@ -7,7 +7,7 @@ import TriageQueue from "@/components/TriageQueue";
 import ClusterDetailModal from "@/components/ClusterDetailModal";
 import CitizenSimulator from "@/components/CitizenSimulator";
 import ThemeSettingsModal from "@/components/ThemeSettingsModal";
-import { fetchIncidents, fetchRoutePassability } from "@/lib/api";
+import { fetchIncidents, fetchRoutePassability, subscribeToIncidents } from "@/lib/api";
 import { IncidentCluster, RoutePassability } from "@/types/api";
 
 const DEFAULT_LAT = 29.7604;
@@ -51,8 +51,50 @@ export default function Dashboard() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 15000);
-    return () => clearInterval(interval);
+    const interval = setInterval(loadData, 30000);
+
+    // Real-time WebSocket connection to backend ws://localhost:8000/ws/incidents
+    const unsubscribe = subscribeToIncidents((realtimeData) => {
+      setIsOffline(false);
+      if (!realtimeData) return;
+
+      // Case 1: Initial state or bulk array of incidents
+      if (Array.isArray(realtimeData)) {
+        setIncidents(realtimeData);
+        return;
+      }
+
+      // Case 2: Individual incoming incident report or cluster broadcast
+      const payloadObj = realtimeData as Record<string, unknown>;
+      const newIncident: IncidentCluster | null =
+        (payloadObj.incident as IncidentCluster | undefined) ||
+        (typeof payloadObj.cluster_id === "string" && typeof payloadObj.priority_score === "number"
+          ? (realtimeData as IncidentCluster)
+          : null);
+
+      if (Array.isArray(payloadObj.incidents)) {
+        setIncidents(payloadObj.incidents as IncidentCluster[]);
+      } else if (newIncident && newIncident.cluster_id) {
+        setIncidents((prev) => {
+          const exists = prev.some((inc) => inc.cluster_id === newIncident.cluster_id);
+          if (exists) {
+            return prev.map((inc) =>
+              inc.cluster_id === newIncident.cluster_id ? { ...inc, ...newIncident } : inc
+            );
+          }
+          return [newIncident, ...prev];
+        });
+      }
+
+      if (newIncident && newIncident.cluster_id) {
+        setSelectedClusterId((prevSelected) => prevSelected || newIncident.cluster_id);
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, [loadData]);
 
   const handleMapLocationSelect = (lat: number, lng: number) => {
